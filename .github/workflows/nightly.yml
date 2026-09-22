@@ -101,7 +101,7 @@ jobs:
 
       - name: Build
         run: >
-          make build &&
+          make build-nightly &&
           make package
         env:
           KAVITA_IMAGE: ${{ inputs.dev_image || 'jvmilazz0/kavita:nightly' }}
