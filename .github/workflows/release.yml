@@ -45,7 +45,9 @@ jobs:
       - uses: ./.github/actions/setup-test-tools
 
       - name: Build client (wheel + sdist + release zip)
-        run: make package
+        run: >
+          make build &&
+          make package
 
       - name: Resolve server image digest
         id: image
