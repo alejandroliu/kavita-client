@@ -54,7 +54,7 @@ jobs:
           echo "version=$ver" >> "$GITHUB_OUTPUT"
 
       - name: Build
-        run: <
+        run: >
           make build &&
           make package
         env:
@@ -100,7 +100,7 @@ jobs:
       - uses: ./.github/actions/setup-test-tools
 
       - name: Build
-        run: <
+        run: >
           make build &&
           make package
         env:
