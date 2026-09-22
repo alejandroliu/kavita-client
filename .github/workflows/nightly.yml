@@ -147,6 +147,11 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Build API docs (docs.zip)
+        run: |
+          make sphinx-html
+          (cd sphinx/_build/html && zip -qr ../../docs.zip .)
+
       - name: Download this run's reports
         uses: actions/download-artifact@v4
         with:
