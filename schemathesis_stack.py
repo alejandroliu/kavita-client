@@ -47,6 +47,13 @@ def _pull(image: str) -> None:
 def up(state_path: str, image: str) -> None:
   if _docker(['info']).returncode != 0:
     sys.exit('docker is not available')
+  from docker_guard import list_conflicts
+  conflicts = list_conflicts()
+  if conflicts:
+    sys.exit(
+      'docker resource conflict '
+      '(stop any in-progress run first, then `make tidy`):\n'
+      + '\n'.join(f'  - {item}' for item in conflicts))
   for required in (image, MOCK_IMAGE):
     if _docker(['image', 'inspect', required]).returncode != 0:
       _pull(required)

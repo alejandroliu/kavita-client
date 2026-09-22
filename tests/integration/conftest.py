@@ -3,7 +3,8 @@
 Environment variables:
 
 - `KAVITA_IMAGE`: container image under test
-  (default `jvmilazz0/kavita:latest`)
+  (default `jvmilazz0/kavita:latest` for `release` mode,
+  `jvmilazz0/kavita:nightly` for `nightly` mode)
 - `KAVITA_PULL`: image refresh policy, `missing`/`never`/`always`
   (default `missing`)
 - `KAVITA_READY_TIMEOUT`: seconds to wait for first boot (default `240`)
@@ -68,7 +69,10 @@ from kavita_client.models import (
 
 from kavita_instance import KavitaInstance, MediaLibrary, expect_upstream_fix
 
-KAVITA_IMAGE = os.environ.get('KAVITA_IMAGE', 'jvmilazz0/kavita:latest')
+KAVITA_IMAGE = os.environ.get('KAVITA_IMAGE',
+                              'jvmilazz0/kavita:nightly'
+                              if os.environ.get('KAVITA_MODE', 'release') == 'nightly'
+                              else 'jvmilazz0/kavita:latest')
 KAVITA_PULL = os.environ.get('KAVITA_PULL', 'missing')
 KAVITA_READY_TIMEOUT = float(os.environ.get('KAVITA_READY_TIMEOUT', '240'))
 KAVITA_SCAN_TIMEOUT = float(os.environ.get('KAVITA_SCAN_TIMEOUT', '180'))

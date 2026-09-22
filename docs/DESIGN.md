@@ -47,7 +47,8 @@ The `Makefile` drives the pipeline:
   patched tagged spec into `<VER>-fixed/kavita-client/`, or from the raw
   develop spec into `DEV/kavita-client/`, with `openapi-client-config.yml`
 - `make test-release` / `make test-nightly` — install the selected client
-  in the venv and run the full suite (writes `reports/junit.xml`)
+  in the venv and run the full suite (writes `reports/junit-release.xml`
+  or `reports/junit-nightly.xml`)
 - `make test-fix_spec` — offline unit tests only
 
 The pipeline's Python steps run through `pys.sh`, which manages the
@@ -175,11 +176,11 @@ unavailable. The populated-library tests live in `tests/integration/`
 **Test targets:**
 
 ```text
-make test-release    full suite against the patched client (writes reports/junit.xml)
-make test-nightly    full suite against the raw develop-spec client (known upstream bugs recorded as xfail)
+make test-release    full suite against the patched client (writes reports/junit-release.xml)
+make test-nightly    full suite against the raw develop-spec client (known upstream bugs recorded as xfail; writes reports/junit-nightly.xml)
 make test-fix_spec   offline unit tests only
-make schemathesis-release  canary: patched spec vs the stable image (reports/schemathesis-junit.xml)
-make schemathesis-nightly  canary: raw dev spec vs the nightly image
+make schemathesis-release  canary: patched spec vs the stable image (reports/schemathesis-release-junit.xml)
+make schemathesis-nightly  canary: raw dev spec vs the nightly image (reports/schemathesis-nightly-junit.xml)
 ```
 
 ### Import strategy (`conftest.py`)

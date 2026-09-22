@@ -1,7 +1,7 @@
 # CI/CD plan (TODO)
 
-Status: **planned, not yet implemented**. The test suite this describes exists;
-the workflows do not.
+Status: **workflows not yet implemented**. The test suite and the Makefile
+packaging targets this describes exist.
 
 ## Goals
 
@@ -10,6 +10,8 @@ the workflows do not.
   the "verified/working" artifact other developers can reuse.
 - **Nightly tracking**: detect regressions in (a) hotfix releases of the stable
   line and (b) the Kavita dev branch / our own pipeline, and flag them.
+- **Published site**: every workflow updates the GitHub Pages site — API
+  docs plus the release/nightly status pages (`docs/DONE-gh-pages.md`).
 
 The test suite (`make test-release` / `make test-nightly`,
 `make test-fix_spec`) is
@@ -36,39 +38,56 @@ Image/tag conventions (verified 2026-09):
 
 ## Workflow 1 — Release (on tag)
 
-Trigger: tag push, e.g. `0.9.1.4` (this repo's tags mirror Kavita's release
-tags).
+Trigger: tag push of `v<VER>`, e.g. `v0.9.1.4` (this repo's tags mirror
+Kavita's release tags), plus `workflow_dispatch` (with version/image inputs,
+so the pipeline can be exercised without pushing a tag).
 
-1. Extract the Kavita version from the tag name.
+1. Extract the Kavita version from the tag name (strip the leading `v`).
 2. Fetch `https://raw.githubusercontent.com/Kareadita/Kavita/v<VER>/openapi.json`.
 3. `fix_spec.py` (invoked with `<VER>` as the tag argument, so the generated
    client's version matches the tag) → `openapi-python-client generate`
-   (generator version to be pinned — see open decisions).
-4. Build the client (`make build` → wheel + sdist); `make test-release`
-   installs it in the test environment, so the suite tests the exact
-   artifact that will be published.
+   (generator intentionally unpinned — see Decisions). The Makefile passes
+   `KAVITA_VERSION` from the environment (`KAVITA_VERSION ?=`), so
+   `KAVITA_VERSION=<VER> make package` is all that is needed.
+4. Build the client: `make package` → wheel + sdist in `dist/`, plus the
+   release zip `dist/kavita-client-<VER>.zip`. `make test-release` installs
+   the built wheel, so the suite tests the exact artifact that will be
+   published.
 5. Resolve the server image: `docker pull jvmilazz0/kavita:latest`, record the
    resulting digest, run `make test-release` against `latest@sha256:…`
-   with `KAVITA_IMAGE` set to the digest form and
-   `KAVITA_EXPECTED_VERSION=<VER>`. A test asserts the running server reports
+   with `KAVITA_IMAGE` set to the digest form,
+   `KAVITA_EXPECTED_VERSION=<VER>` and `KAVITA_PULL=never` (the image was
+   just pulled). A test asserts the running server reports
    `<VER>` (via `GET /api/Server/server-info-slim` → `kavitaVersion`), which
    is the digest/version cross-check.
-6. If green: attach the built artifacts (zip containing the wheel/sdist, i.e.
+6. If green: attach `dist/kavita-client-<VER>.zip` (the wheel + sdist, i.e.
    the installable `kavita-client`) to the GitHub Release, and record the
    verified image digest in the release body.
 7. Failures block the release.
+8. Pages: after a green run, `make gh-pages` and publish the site
+   (`gh-pages/` → `actions/upload-pages-artifact` +
+   `actions/deploy-pages`; see "Pages publishing" below). The site deploy is
+   a separate job and **non-blocking**: a pages failure does not unpublish
+   or delay the release artifacts from step 6.
 
 ## Workflow 2 — Nightly, stable line (cron)
 
 Trigger: nightly cron + `workflow_dispatch`.
 
-- Client: the released client (checkout of the latest release tag, or `main`),
-  run via `make test-release`.
+- Client: the released client — checkout of the latest release tag (`main`
+  as a fallback before the first release), run via `make test-release`.
 - Image: `jvmilazz0/kavita:latest`, `KAVITA_PULL=always` — catches hotfix
   releases that move the `latest` tag and regress the API.
-- Failure handling: **do not block anything**. Open/update a tracking issue
-  with the JUnit breakdown (`--junitxml`) listing exactly which endpoints
-  broke. This is the "flag regressions in the stable line" signal.
+- Failure handling: **do not block anything**. Update the persistent
+  tracking issue (see Decisions) with the JUnit breakdown (`--junitxml`)
+  listing exactly which endpoints broke. This is the "flag regressions in
+  the stable line" signal.
+- Pages: run after the test step **whether it passed or failed** — the
+  nightly page exists to show the failures. Restore
+  `reports/junit-nightly.previous.xml` (downloaded from the previous run's
+  artifact), `make gh-pages`, deploy; the tracking-issue comment links the
+  page. Site publishing is non-blocking like everything else in this
+  workflow.
 
 ## Workflow 3 — Nightly, dev line (cron)
 
@@ -85,38 +104,100 @@ Trigger: nightly cron + `workflow_dispatch`.
   "the known bugs are still there, nothing changed". When upstream fixes
   one, the corresponding test stops xfailing and starts passing — review
   and retire the fix. Any *other* failure is a real regression.
-- Failure handling: same as Workflow 2 (tracking issue, non-blocking). This is
+- Failure handling: same as Workflow 2 (persistent tracking issue,
+  non-blocking). This is
   the "track what the Kavita developer is doing" signal.
+- Pages: same as Workflow 2 — nightly page refresh from the fresh junit,
+  previous-junit handoff for the upstream-fixed flag, tracking-issue
+  comment links the page.
 
 ## Workflow 4 — PR / push (fast gate)
 
 - Offline unit tests only (`make test-fix_spec`, i.e. the `fix_spec` tests).
 - Docker integration runs optionally (labels / `workflow_dispatch`) to save CI
-  minutes; the image pull alone is ~250 MB.
+  minutes; the image pull alone is ~250 MB. The optional run uploads the
+  JUnit XML as a run artifact.
+- No pages publishing here: the gate runs before anything is verified, so
+  it must not touch the published site.
 
-## Regression drift check (open discussion)
+## Pages publishing (shared by Workflows 1–3)
+
+`make gh-pages` renders `gh-pages/`: the sphinx API docs (as `docs/`), the
+release status page (`kavita_quirks.yaml` registry + the release test run)
+and the nightly status page (the nightly test run, with the "upstream
+fixed" flags computed against `reports/junit-nightly.previous.xml`). See
+`docs/DONE-gh-pages.md`.
+
+### Report artifacts (split by line)
+
+The release and nightly runs write disjoint report sets, so they never
+overwrite each other and `make gh-pages` can render both:
+
+| Report | Written by |
+|---|---|
+| `reports/junit-release.xml` | `make test-release` |
+| `reports/junit-nightly.xml` | `make test-nightly` |
+| `reports/junit-nightly.previous.xml` | CI handoff (previous nightly run) |
+| `reports/schemathesis-release-junit.xml` | `make schemathesis-release` |
+| `reports/schemathesis-nightly-junit.xml` | `make schemathesis-nightly` |
+
+- Deploy: `actions/upload-pages-artifact` + `actions/deploy-pages`. The
+  repo's Pages source must be set to "GitHub Actions"; the deploy job needs
+  `pages: write` and `id-token: write` and runs against the `github-pages`
+  environment.
+- Single "latest" site with a version stamp; per-release archives deferred
+  (DONE-gh-pages decision 3).
+- Non-blocking by design: a pages failure never unpublishes the release zip
+  and never fails the nightly signal.
+- Previous-junit handoff: nightly jobs upload `junit-nightly.previous.xml`
+  as a run artifact; the next run downloads it (e.g. `gh run download`)
+  before `make gh-pages`, so the upstream-fixed flag compares consecutive
+  runs.
+
+## Workflow outputs
+
+What each workflow leaves behind, besides the pass/fail status:
+
+| Workflow | Durable outputs | Diagnostics |
+|---|---|---|
+| 1 — Release (tag) | GitHub Release with `kavita-client-<VER>.zip` (wheel + sdist); release body records the verified image digest; **published site** (docs + release status + release test run) | `reports/junit-release.xml` + `reports/schemathesis-release-junit.xml` uploaded as run artifacts |
+| 2 — Nightly, stable | **published site** (nightly status refreshed) | `reports/junit-release.xml` run artifact; update/comment on the persistent tracking issue |
+| 3 — Nightly, dev | **published site** (nightly status refreshed) | `reports/junit-nightly.xml` + `reports/schemathesis-nightly-junit.xml` run artifacts; update/comment on the same tracking issue |
+| 4 — PR / push | — | JUnit XML run artifact only when the optional integration run is enabled |
+
+The durable outputs of the CI setup are the release zip attached to the
+GitHub Release and the published Pages site; the nightlies exist to
+*observe and flag*, so their outputs are diagnostic (artifacts + issue
+comments) plus a refreshed site.
+
+## Dependency drift (decided: track, don't gate)
 
 The original idea was for CI to fail when a fresh generation differs from the
-released client. Observations:
+released client. Decided against it:
 
-- A diff check is only meaningful when the generator is pinned; the dev-line
-  job generates from `develop`, which is intentionally ahead of the released
-  stable client, so a naive check there would always "drift".
-- Therefore: no drift gate on dev jobs. On tags, the clean generation from the
-  pinned spec *is* the build (step 3 above); comparing it against the released
-  client is optional belt-and-braces and would require the pinning decision
-  below to be made first.
+- A diff check is only meaningful when the generator is pinned; with
+  dependencies deliberately unpinned (see Decisions), "drift" has no fixed
+  reference point.
+- Drift still surfaces, as regressions, through the nightly jobs: a generator
+  or dependency change that breaks generation or behavior shows up in the
+  tracking issue like any other regression (Workflows 2 and 3).
 
-## Open decisions
+## Decisions (2026-09-22)
 
-- [ ] Pin `openapi-python-client` (and pytest) in `requirements.txt` or use a
-      lock file. Currently unpinned.
-- [ ] Release artifact format: the plan is a zip of wheel + sdist on the
-      GitHub Release (Workflow 1, step 6); still open whether to also publish
-      to PyPI.
-- [ ] This repo's tag naming convention (`0.9.1.4` vs `v0.9.1.4`).
-- [ ] Nightly failures: one persistent tracking issue that gets updated vs. a
-      new issue per failure.
+- [x] **No pinning.** `requirements.txt` stays deliberately unpinned; the
+      nightly jobs are the drift tracker for the generator and other
+      dependencies as well as for Kavita itself.
+- [x] **Release artifact format:** zip of wheel + sdist
+      (`make package` → `dist/kavita-client-<VER>.zip`) on the GitHub
+      Release. PyPI publishing is deferred (revisit only if the client is
+      consumed via `pip install`).
+- [x] **Tag naming convention:** `v<VER>` (e.g. `v0.9.1.4`), mirroring
+      Kavita's tags; the release workflow strips the leading `v`.
+- [x] **Nightly failures:** one persistent tracking issue that gets updated
+      per failing run, rather than a new issue per failure.
+- [x] **Pages publishing:** single "latest" site (`make gh-pages`),
+      deployed non-blocking via the GitHub Pages actions
+      (`docs/DONE-gh-pages.md`, decision 5).
 
 ## Known live-server quirks (from test runs, v0.9.1.4 source)
 

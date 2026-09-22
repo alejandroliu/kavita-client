@@ -81,8 +81,9 @@ Makefile targets next to the existing ones:
 - `make schemathesis-release` — patched spec vs `jvmilazz0/kavita:latest`
 - `make schemathesis-nightly` — raw dev spec vs `jvmilazz0/kavita:nightly`
 
-JUnit XML to `reports/schemathesis-*.xml` (keep the curated
-`reports/junit.xml` untouched).
+JUnit XML to `reports/schemathesis-release-junit.xml` /
+`reports/schemathesis-nightly-junit.xml` (the curated
+`reports/junit-*.xml` files stay separate).
 
 ## Value-provider registry (phase 2, optional)
 

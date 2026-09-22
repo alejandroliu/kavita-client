@@ -1,9 +1,13 @@
 
+# Deliberately unpinned (except the schemathesis/hypothesis pair): the
+# nightly CI is the drift tracker for these dependencies.
 openapi-python-client
 pytest
 pyyaml
+# pinned as a known-good pair:
 schemathesis==4.27.5
 hypothesis==6.168.0
+build
 
 sphinx
 myst-parser
