@@ -16,3 +16,17 @@
   * python:3-alpine - runs the local TLS mock of api.github.com /
     raw.githubusercontent.com (`github_mock` fixture, DESIGN quirk 23)
 
+# CI (GitHub Actions)
+
+GitHub-hosted `ubuntu-latest` runners provide Docker, pandoc,
+poppler-utils and openssl out of the box.  The workflows install the rest
+via `.github/actions/setup-test-tools` (calibre, `fonts-liberation`,
+typst, plus the preinstalled ones for belt-and-braces).  Every
+docker-backed job (release verification, nightly stable/dev lines, the
+optional PR integration run) uses it.
+
+If a tool is missing at run time anyway, the `media_library` fixture
+skips the media tests with a clear message (`media generation tools are
+not available: ...`) rather than failing the suite — the run stays green
+but with reduced media coverage, which is worth checking in the logs.
+

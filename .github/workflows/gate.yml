@@ -39,8 +39,14 @@ jobs:
         with:
           python-version: '3.12'
 
+      - uses: ./.github/actions/setup-test-tools
+
       - name: Release suite against the stable image
-        run: make test-release
+        run: >
+          make build &&
+          make package &&
+          make test-release &&
+          make schemathesis-release
 
       - name: Upload report
         if: always()

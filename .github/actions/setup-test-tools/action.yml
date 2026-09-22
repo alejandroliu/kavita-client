@@ -1,0 +1,32 @@
+name: Setup test tools
+description: |
+  Install the host tools the docker integration suite needs
+  (docs/dependencies.md).  GitHub-hosted ubuntu-latest runners provide
+  Docker, pandoc, poppler-utils and openssl out of the box; this installs
+  the rest.  If a tool is still missing at run time, the media fixture
+  skips with a clear message rather than failing.
+
+runs:
+  using: composite
+  steps:
+    - name: Install apt tools (calibre, fonts, poppler, pandoc)
+      shell: bash
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          calibre fonts-liberation poppler-utils pandoc
+
+    - name: Install typst (skip if already present)
+      shell: bash
+      run: |
+        if command -v typst >/dev/null 2>&1; then
+          echo "typst already present: $(typst --version)"
+          exit 0
+        fi
+        set -euo pipefail
+        url=$(curl -fsSL https://api.github.com/repos/typst/typst/releases/latest \
+          | jq -r '.assets[].browser_download_url | select(endswith("x86_64-unknown-linux-musl.tar.xz"))')
+        curl -fsSL "$url" -o /tmp/typst.tar.xz
+        mkdir -p /tmp/typst && tar -xJf /tmp/typst.tar.xz -C /tmp/typst
+        sudo mv /tmp/typst/typst-x86_64-unknown-linux-musl/typst /usr/local/bin/typst
+        typst --version
