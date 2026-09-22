@@ -23,7 +23,9 @@ jobs:
           python-version: '3.12'
 
       - name: Offline tests
-        run: make test-offline
+        run: >
+          make build &&
+          make test-offline
 
   integration:
     name: docker integration (optional)
