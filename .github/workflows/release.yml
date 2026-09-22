@@ -1,0 +1,98 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Kavita version (e.g. 0.9.1.4); defaults to the tag without the leading v'
+        required: false
+        default: ''
+      image:
+        description: 'Server image to verify against (default jvmilazz0/kavita:latest)'
+        required: false
+        default: 'jvmilazz0/kavita:latest'
+
+permissions:
+  contents: write
+  actions: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: resolve
+        run: |
+          if [ -n "${{ inputs.version }}" ]; then
+            ver="${{ inputs.version }}"
+          else
+            ver="${GITHUB_REF_NAME#v}"
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+          echo "KAVITA_VERSION=$ver" >> "$GITHUB_ENV"
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Build client (wheel + sdist + release zip)
+        run: make package
+
+      - name: Resolve server image digest
+        id: image
+        run: |
+          image="${{ inputs.image || 'jvmilazz0/kavita:latest' }}"
+          docker pull "$image"
+          digest=$(docker inspect --format '{{index .RepoDigests 0}}' "$image")
+          echo "digest=$digest" >> "$GITHUB_OUTPUT"
+
+      - name: Test release client against the pinned image
+        run: |
+          make test-release \
+            KAVITA_IMAGE="${{ steps.image.outputs.digest }}" \
+            KAVITA_PULL=never \
+            KAVITA_EXPECTED_VERSION="${{ steps.resolve.outputs.version }}"
+
+      - name: Schemathesis release canary (report only)
+        if: always()
+        continue-on-error: true
+        run: make schemathesis-release
+
+      - name: Upload test reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-reports
+          path: |
+            reports/junit-release.xml
+            reports/schemathesis-release-junit.xml
+          if-no-files-found: ignore
+
+      - name: Build API docs (docs.zip)
+        run: |
+          make sphinx-html
+          (cd sphinx/_build/html && zip -qr ../../docs.zip .)
+
+      - name: Publish GitHub Release
+        if: startsWith(github.ref, 'refs/tags/')
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          files: |
+            dist/kavita-client-${{ steps.resolve.outputs.version }}.zip
+            docs.zip
+          body: |
+            Verified against: `${{ steps.image.outputs.digest }}`
+
+      - name: Trigger nightly site refresh
+        if: startsWith(github.ref, 'refs/tags/')
+        run: gh workflow run nightly.yml
+        env:
+          GH_TOKEN: ${{ github.token }}

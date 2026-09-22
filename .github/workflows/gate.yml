@@ -1,0 +1,51 @@
+name: Gate
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      integration:
+        description: 'Run the docker integration suite'
+        type: boolean
+        default: false
+
+jobs:
+  offline:
+    name: offline unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Offline tests
+        run: make test-offline
+
+  integration:
+    name: docker integration (optional)
+    if: >
+      (github.event_name == 'workflow_dispatch' && inputs.integration) ||
+      (github.event_name == 'pull_request' &&
+       contains(github.event.pull_request.labels.*.name, 'integration'))
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Release suite against the stable image
+        run: make test-release
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: integration-report
+          path: reports/junit-release.xml
+          if-no-files-found: ignore

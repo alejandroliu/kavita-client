@@ -1,0 +1,232 @@
+name: Nightly
+
+on:
+  schedule:
+    - cron: '30 3 * * *'
+  workflow_dispatch:
+    inputs:
+      stable_image:
+        description: 'Stable-line image (default jvmilazz0/kavita:latest)'
+        required: false
+        default: 'jvmilazz0/kavita:latest'
+      dev_image:
+        description: 'Dev-line image (default jvmilazz0/kavita:nightly)'
+        required: false
+        default: 'jvmilazz0/kavita:nightly'
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+# One nightly at a time; a release-triggered refresh queues behind a running
+# cron run instead of racing it.
+concurrency:
+  group: nightly
+  cancel-in-progress: false
+
+jobs:
+  stable:
+    name: stable line
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.resolve.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Resolve released version
+        id: resolve
+        run: |
+          tag=$(git describe --tags --abbrev=0 2>/dev/null || true)
+          if [ -n "$tag" ]; then
+            ver="${tag#v}"
+          else
+            ver=$(sed -n 's/^KAVITA_VERSION ?= *//p' Makefile)
+          fi
+          echo "version=$ver" >> "$GITHUB_OUTPUT"
+
+      - name: Release client vs stable image
+        continue-on-error: true
+        run: make test-release
+        env:
+          KAVITA_VERSION: ${{ steps.resolve.outputs.version }}
+          KAVITA_IMAGE: ${{ inputs.stable_image || 'jvmilazz0/kavita:latest' }}
+          KAVITA_PULL: always
+
+      - name: Schemathesis release canary
+        continue-on-error: true
+        run: make schemathesis-release
+        env:
+          KAVITA_VERSION: ${{ steps.resolve.outputs.version }}
+          KAVITA_IMAGE: ${{ inputs.stable_image || 'jvmilazz0/kavita:latest' }}
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: stable-reports
+          path: |
+            reports/junit-release.xml
+            reports/schemathesis-release-junit.xml
+          if-no-files-found: ignore
+
+  dev:
+    name: dev line
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Dev client vs nightly image
+        continue-on-error: true
+        run: make test-nightly
+        env:
+          KAVITA_IMAGE: ${{ inputs.dev_image || 'jvmilazz0/kavita:nightly' }}
+          KAVITA_PULL: always
+
+      - name: Schemathesis nightly canary
+        continue-on-error: true
+        run: make schemathesis-nightly
+        env:
+          KAVITA_IMAGE: ${{ inputs.dev_image || 'jvmilazz0/kavita:nightly' }}
+
+      - name: Upload reports
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: dev-reports
+          path: |
+            reports/junit-nightly.xml
+            reports/schemathesis-nightly-junit.xml
+          if-no-files-found: ignore
+
+  pages:
+    name: build and upload site
+    needs: [stable, dev]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      pages: write
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Download this run's reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports
+          pattern: '*-reports'
+          merge-multiple: true
+
+      - name: Restore previous nightly junit
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          prev=$(gh run list --workflow nightly.yml --limit 10 \
+            --json databaseId,status \
+            --jq '[.[] | select(.status == "completed") | .databaseId][0]' \
+            2>/dev/null || true)
+          if [ -n "$prev" ]; then
+            mkdir -p /tmp/prev
+            gh run download "$prev" --name dev-reports --dir /tmp/prev 2>/dev/null || true
+            if [ -f /tmp/prev/junit-nightly.xml ]; then
+              cp /tmp/prev/junit-nightly.xml reports/junit-nightly.previous.xml
+            fi
+          fi
+
+      - name: Fetch docs.zip from the latest release
+        id: docs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          mkdir -p /tmp/docs
+          if gh release download --pattern 'docs.zip' --dir /tmp/docs 2>/dev/null; then
+            (cd /tmp/docs && unzip -q -o docs.zip -d html)
+            echo "docs_from=/tmp/docs/html" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build site
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          args=()
+          if [ -n "${{ steps.docs.outputs.docs_from }}" ]; then
+            args+=(--docs-from "${{ steps.docs.outputs.docs_from }}")
+          fi
+          ver=$(gh release list --limit 1 --json tagName \
+            --jq '.[0].tagName' 2>/dev/null | sed 's/^v//')
+          ./pys.sh pages/build_site.py --version "${ver:-dev}" "${args[@]}"
+
+      - name: Upload pages artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: gh-pages
+
+  deploy:
+    name: deploy site
+    needs: pages
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - id: deploy
+        uses: actions/deploy-pages@v4
+
+  issue:
+    name: tracking issue
+    needs: [stable, dev]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download this run's reports
+        uses: actions/download-artifact@v4
+        with:
+          path: reports
+          pattern: '*-reports'
+          merge-multiple: true
+
+      - name: Post breakdown to the tracking issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          python3 nightly_summary.py > /tmp/summary.md
+          marker=$(tail -n 1 /tmp/summary.md)
+          sed -i '$d' /tmp/summary.md
+          if [ "$marker" != "FAILED" ]; then
+            echo "no failures to report"
+            exit 0
+          fi
+          gh label create nightly-tracking --force >/dev/null 2>&1 || true
+          issue=$(gh issue list --label nightly-tracking --state open \
+            --limit 1 --json number --jq '.[0].number')
+          if [ -z "$issue" ]; then
+            gh issue create --label nightly-tracking \
+              --title 'Nightly regression tracking' --body-file /tmp/summary.md
+          else
+            gh issue comment "$issue" --body-file /tmp/summary.md
+          fi

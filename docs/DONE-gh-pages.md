@@ -52,8 +52,13 @@ repo:
    passing* is highlighted — that is the retirement signal the xfail
    machinery exists for, and it deserves prominence, not a green line.
 5. **Deployment**: GitHub Pages via the standard
-   `actions/upload-pages-artifact` + `actions/deploy-pages` pair, emitted
-   by the CI plan's workflows (`docs/TODO-ci-plan.md`). Local preview:
+   `actions/upload-pages-artifact` + `actions/deploy-pages` pair, with a
+   **single deployer** — the nightly workflow's pages job
+   (`docs/TODO-ci-plan.md`, Workflow 2 job C). The release workflow never
+   deploys; it attaches `docs.zip` to the GitHub Release and triggers the
+   nightly workflow so the site refreshes the same day. The nightly pages
+   job imports the docs via `pages/build_site.py --docs-from <docs.zip>`
+   instead of the sphinx copy. Local preview:
    `make gh-pages` + `python -m http.server` in the build dir.
 
 ## Work items
@@ -79,20 +84,26 @@ repo:
 
 ### A2 — docs embedding + Makefile target
 
-- `make gh-pages`:
+- `make gh-pages` (local preview):
   1. `make sphinx-html`
   2. `./pys.sh pages/build_site.py` (copies the sphinx output to
      `gh-pages/docs/`, generates the status pages).
+- CI uses `pages/build_site.py --docs-from <docs.zip unpacked>` instead,
+  so the published docs are the exact released ones (no regeneration).
 - Local preview documented in the target help text.
 
 ### A3 — CI wiring (`docs/TODO-ci-plan.md`)
 
-*(Plan wiring delivered 2026-09-22; the workflow files remain.)*
+*(Plan wiring delivered 2026-09-22, merged-nightly restructure 2026-09-22;
+the workflow files remain.)*
 
-- Release workflow: after a green run, `make gh-pages` and upload the
-  artifact; a `pages` job deploys it.
-- Nightly workflow: `make gh-pages` refreshes the nightly page and the
-  tracking issue gets the page link (the existing tracking-issue flow).
+- Release workflow: after a green run, attach `docs.zip` (sphinx) to the
+  release and trigger the nightly workflow (`gh workflow run`) — it never
+  deploys Pages itself.
+- Nightly workflow (stable + dev lines): both test jobs upload their
+  report artifacts; the pages job downloads them, restores the previous
+  nightly junit, imports the latest release's `docs.zip`, builds the site
+  and deploys it (single deployer).
 - The site deployment is **non-blocking** for the release artifacts.
 
 ### A4 — verification
@@ -121,4 +132,5 @@ repo:
       findings-disposition decision).
 
 *Status: A1/A2/A4 delivered (2026-09-22); A3 plan wiring delivered
-(2026-09-22) — workflow files remain; the open questions are still open.*
+(2026-09-22); workflow files added (2026-09-22), not yet run on GitHub
+Actions; the open questions are still open.*

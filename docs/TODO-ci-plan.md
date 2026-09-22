@@ -1,7 +1,7 @@
 # CI/CD plan (TODO)
 
-Status: **workflows not yet implemented**. The test suite and the Makefile
-packaging targets this describes exist.
+Status: **workflow files added (2026-09-22), not yet run on GitHub Actions**.
+The test suite and the Makefile packaging targets this describes exist.
 
 ## Goals
 
@@ -10,8 +10,9 @@ packaging targets this describes exist.
   the "verified/working" artifact other developers can reuse.
 - **Nightly tracking**: detect regressions in (a) hotfix releases of the stable
   line and (b) the Kavita dev branch / our own pipeline, and flag them.
-- **Published site**: every workflow updates the GitHub Pages site — API
-  docs plus the release/nightly status pages (`docs/DONE-gh-pages.md`).
+- **Published site**: the nightly workflow owns and deploys the GitHub
+  Pages site — API docs (release version) plus the release/nightly status
+  pages (`docs/DONE-gh-pages.md`); the release workflow triggers a refresh.
 
 The test suite (`make test-release` / `make test-nightly`,
 `make test-fix_spec`) is
@@ -64,79 +65,95 @@ so the pipeline can be exercised without pushing a tag).
    the installable `kavita-client`) to the GitHub Release, and record the
    verified image digest in the release body.
 7. Failures block the release.
-8. Pages: after a green run, `make gh-pages` and publish the site
-   (`gh-pages/` → `actions/upload-pages-artifact` +
-   `actions/deploy-pages`; see "Pages publishing" below). The site deploy is
-   a separate job and **non-blocking**: a pages failure does not unpublish
-   or delay the release artifacts from step 6.
+8. If green: build the API docs from the release client (`make sphinx-html`)
+   and attach `docs.zip` to the GitHub Release — this is what the nightly
+   site build imports as `docs/` (the site always shows the *exact
+   released* docs, not a regeneration).
+9. Trigger the nightly workflow (`gh workflow run nightly.yml`) so the
+   site refreshes the same day. The release workflow never deploys Pages
+   itself — the nightly workflow is the site's single deployer.
 
-## Workflow 2 — Nightly, stable line (cron)
+## Workflow 2 — Nightly, stable + dev lines (cron)
 
 Trigger: nightly cron + `workflow_dispatch`.
+
+One workflow, three jobs — both test lines plus a single site deploy, so
+there is exactly **one deployer** of the "latest" site and the two report
+sets can never overwrite each other.
+
+**Job A — stable line** (`make test-release`):
 
 - Client: the released client — checkout of the latest release tag (`main`
-  as a fallback before the first release), run via `make test-release`.
+  as a fallback before the first release).
 - Image: `jvmilazz0/kavita:latest`, `KAVITA_PULL=always` — catches hotfix
   releases that move the `latest` tag and regress the API.
-- Failure handling: **do not block anything**. Update the persistent
-  tracking issue (see Decisions) with the JUnit breakdown (`--junitxml`)
-  listing exactly which endpoints broke. This is the "flag regressions in
-  the stable line" signal.
-- Pages: run after the test step **whether it passed or failed** — the
-  nightly page exists to show the failures. Restore
-  `reports/junit-nightly.previous.xml` (downloaded from the previous run's
-  artifact), `make gh-pages`, deploy; the tracking-issue comment links the
-  page. Site publishing is non-blocking like everything else in this
-  workflow.
+- Also runs the `make schemathesis-release` canary.
+- Outputs: `reports/junit-release.xml` +
+  `reports/schemathesis-release-junit.xml`.
 
-## Workflow 3 — Nightly, dev line (cron)
-
-Trigger: nightly cron + `workflow_dispatch`.
+**Job B — dev line** (`make test-nightly`):
 
 - Client: generated fresh from the `develop` branch (`kavita_DEV.json` +
-  `make build-nightly`, run via `make test-nightly`); generator version may
-  be unpinned here — nothing is committed or published, so drift is
-  irrelevant.
+  `make build-nightly`); generator version may be unpinned here — nothing
+  is committed or published, so drift is irrelevant.
 - Image: `jvmilazz0/kavita:nightly`, `KAVITA_PULL=always`.
+- Also runs the `make schemathesis-nightly` canary.
 - The tests that depend on a `fix_spec.py` fix record the still-present
   upstream bug as xfail (`expect_upstream_fix`), and the offline suite
   records the spec-version/tag mismatch as xfail too — so a green run means
   "the known bugs are still there, nothing changed". When upstream fixes
   one, the corresponding test stops xfailing and starts passing — review
   and retire the fix. Any *other* failure is a real regression.
-- Failure handling: same as Workflow 2 (persistent tracking issue,
-  non-blocking). This is
-  the "track what the Kavita developer is doing" signal.
-- Pages: same as Workflow 2 — nightly page refresh from the fresh junit,
-  previous-junit handoff for the upstream-fixed flag, tracking-issue
-  comment links the page.
+- Outputs: `reports/junit-nightly.xml` +
+  `reports/schemathesis-nightly-junit.xml`.
 
-## Workflow 4 — PR / push (fast gate)
+**Job C — pages** (runs after A and B, **whether they passed or failed** —
+the site exists to show the failures):
 
-- Offline unit tests only (`make test-fix_spec`, i.e. the `fix_spec` tests).
+- Downloads the same-run report artifacts from A and B, restores
+  `reports/junit-nightly.previous.xml` from the previous run's artifact
+  (the upstream-fixed flag handoff), and downloads `docs.zip` from the
+  latest GitHub Release (`gh release download`; before the first release
+  the docs link is simply omitted).
+- `pages/build_site.py --docs-from <unzipped docs>` → renders
+  `gh-pages/` → `actions/upload-pages-artifact` + `actions/deploy-pages`.
+- Single deployer: no overwrite between the lines, no race.
+
+**Failure handling** (jobs A and B): **do not block anything**. Update the
+persistent tracking issue (see Decisions) with the JUnit breakdown
+(`--junitxml`) listing exactly which endpoints broke — stable line
+regressions and dev-line drift land in the same issue, each labelled with
+its line; the comment links the site page.
+
+## Workflow 3 — PR / push (fast gate)
+
+- Offline unit tests only (`make test-offline` — the fix_spec, quirks
+  registry, pages and docker-guard tests).
 - Docker integration runs optionally (labels / `workflow_dispatch`) to save CI
   minutes; the image pull alone is ~250 MB. The optional run uploads the
   JUnit XML as a run artifact.
 - No pages publishing here: the gate runs before anything is verified, so
   it must not touch the published site.
 
-## Pages publishing (shared by Workflows 1–3)
+## Pages publishing (Workflow 2, job C)
 
-`make gh-pages` renders `gh-pages/`: the sphinx API docs (as `docs/`), the
+`make gh-pages` renders `gh-pages/`: the API docs (as `docs/`), the
 release status page (`kavita_quirks.yaml` registry + the release test run)
-and the nightly status page (the nightly test run, with the "upstream
+and the nightly status page (the dev-line test run, with the "upstream
 fixed" flags computed against `reports/junit-nightly.previous.xml`). See
-`docs/DONE-gh-pages.md`.
+`docs/DONE-gh-pages.md`. In CI, job C runs
+`pages/build_site.py --docs-from <docs.zip unpacked>` instead of the
+sphinx copy, so the docs always match the exact released client.
 
 ### Report artifacts (split by line)
 
 The release and nightly runs write disjoint report sets, so they never
-overwrite each other and `make gh-pages` can render both:
+overwrite each other and the site renders both:
 
 | Report | Written by |
 |---|---|
-| `reports/junit-release.xml` | `make test-release` |
-| `reports/junit-nightly.xml` | `make test-nightly` |
+| `reports/junit-release.xml` | `make test-release` (workflow 1; nightly job A) |
+| `reports/junit-nightly.xml` | `make test-nightly` (nightly job B) |
 | `reports/junit-nightly.previous.xml` | CI handoff (previous nightly run) |
 | `reports/schemathesis-release-junit.xml` | `make schemathesis-release` |
 | `reports/schemathesis-nightly-junit.xml` | `make schemathesis-nightly` |
@@ -149,10 +166,9 @@ overwrite each other and `make gh-pages` can render both:
   (DONE-gh-pages decision 3).
 - Non-blocking by design: a pages failure never unpublishes the release zip
   and never fails the nightly signal.
-- Previous-junit handoff: nightly jobs upload `junit-nightly.previous.xml`
-  as a run artifact; the next run downloads it (e.g. `gh run download`)
-  before `make gh-pages`, so the upstream-fixed flag compares consecutive
-  runs.
+- Previous-junit handoff: job B uploads `junit-nightly.previous.xml` as a
+  run artifact; the next run's job C downloads it before building the
+  site, so the upstream-fixed flag compares consecutive runs.
 
 ## Workflow outputs
 
@@ -160,15 +176,15 @@ What each workflow leaves behind, besides the pass/fail status:
 
 | Workflow | Durable outputs | Diagnostics |
 |---|---|---|
-| 1 — Release (tag) | GitHub Release with `kavita-client-<VER>.zip` (wheel + sdist); release body records the verified image digest; **published site** (docs + release status + release test run) | `reports/junit-release.xml` + `reports/schemathesis-release-junit.xml` uploaded as run artifacts |
-| 2 — Nightly, stable | **published site** (nightly status refreshed) | `reports/junit-release.xml` run artifact; update/comment on the persistent tracking issue |
-| 3 — Nightly, dev | **published site** (nightly status refreshed) | `reports/junit-nightly.xml` + `reports/schemathesis-nightly-junit.xml` run artifacts; update/comment on the same tracking issue |
-| 4 — PR / push | — | JUnit XML run artifact only when the optional integration run is enabled |
+| 1 — Release (tag) | GitHub Release with `kavita-client-<VER>.zip` (wheel + sdist) and `docs.zip` (sphinx); release body records the verified image digest; triggers the nightly site refresh | `reports/junit-release.xml` + `reports/schemathesis-release-junit.xml` uploaded as run artifacts |
+| 2 — Nightly (stable + dev) | **published site** (docs + release status + release test run + nightly test run) | `reports/junit-release.xml`, `reports/junit-nightly.xml` + both schemathesis junits as run artifacts; update/comment on the persistent tracking issue; `junit-nightly.previous.xml` handoff artifact |
+| 3 — PR / push | — | JUnit XML run artifact only when the optional integration run is enabled |
 
-The durable outputs of the CI setup are the release zip attached to the
-GitHub Release and the published Pages site; the nightlies exist to
-*observe and flag*, so their outputs are diagnostic (artifacts + issue
-comments) plus a refreshed site.
+The durable outputs of the CI setup are the release zip + docs.zip attached
+to the GitHub Release and the published Pages site (single deployer: the
+nightly workflow); the nightlies exist to *observe and flag*, so their
+outputs are diagnostic (artifacts + issue comments) plus the refreshed
+site.
 
 ## Dependency drift (decided: track, don't gate)
 
@@ -180,7 +196,7 @@ released client. Decided against it:
   reference point.
 - Drift still surfaces, as regressions, through the nightly jobs: a generator
   or dependency change that breaks generation or behavior shows up in the
-  tracking issue like any other regression (Workflows 2 and 3).
+  tracking issue like any other regression (Workflow 2, jobs A and B).
 
 ## Decisions (2026-09-22)
 

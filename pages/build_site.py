@@ -94,8 +94,6 @@ source of truth for how the release client differs from the published
 OpenAPI document. {len(fixes)} fixes patch the spec before code
 generation; {len(quirks)} quirks document the server behaviors behind
 them ({open_quirks} still open upstream).</p>
-<p>Related upstream discussion:
-<a href="{UPSTREAM_ISSUE}">Kareadita/Kavita#4934</a>.</p>
 <h2>Fixes (applied to the release client)</h2>
 <table>
 <tr><th>Fix</th><th>Title</th><th>Endpoints</th><th>Fields</th></tr>
@@ -205,7 +203,8 @@ def nightly_page(root: Path, out: Path, stamp: str) -> str:
   return _page('Nightly test status', body, stamp)
 
 
-def build(version: str, root: Path = ROOT, out: Path = OUT) -> None:
+def build(version: str, root: Path = ROOT, out: Path = OUT,
+          docs_from: Path | None = None) -> None:
   stamp = f'kavita-client {esc(version)} — built {time.strftime("%Y-%m-%d %H:%M:%S")}'
   out.mkdir(parents=True, exist_ok=True)
   (out / 'status').mkdir(exist_ok=True)
@@ -215,11 +214,14 @@ def build(version: str, root: Path = ROOT, out: Path = OUT) -> None:
   (out / 'status' / 'nightly.html').write_text(nightly_page(root, out, stamp), encoding='utf-8')
 
   sphinx_docs = out / 'docs'
-  sphinx_html = root / 'sphinx' / '_build' / 'html'
-  if sphinx_html.is_dir():
+  # `docs_from` (CI: the unpacked docs.zip attached to the GitHub Release)
+  # wins over the local sphinx output.
+  docs_source = (docs_from if docs_from is not None and docs_from.is_dir()
+                 else root / 'sphinx' / '_build' / 'html')
+  if docs_source.is_dir():
     if sphinx_docs.exists():
       shutil.rmtree(sphinx_docs)
-    shutil.copytree(sphinx_html, sphinx_docs)
+    shutil.copytree(docs_source, sphinx_docs)
   docs_link = '<li><a href="docs/">API documentation (sphinx)</a></li>' if sphinx_docs.is_dir() else ''
 
   index = f'''<!doctype html>
@@ -245,8 +247,12 @@ def main() -> None:
   parser.add_argument('--version', default='dev')
   parser.add_argument('--root', type=Path, default=ROOT)
   parser.add_argument('--out', type=Path, default=None)
+  parser.add_argument('--docs-from', type=Path, default=None,
+                      help='import pre-built API docs from this directory '
+                           '(CI: the unpacked docs.zip from the release)')
   args = parser.parse_args()
-  build(args.version, root=args.root, out=args.out or args.root / 'gh-pages')
+  build(args.version, root=args.root, out=args.out or args.root / 'gh-pages',
+        docs_from=args.docs_from)
 
 
 if __name__ == '__main__':

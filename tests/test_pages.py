@@ -80,3 +80,14 @@ def test_no_flag_without_previous_junit(tmp_path: Path) -> None:
   nightly = (tmp_path / 'gh-pages' / 'status' / 'nightly.html').read_text(encoding='utf-8')
   assert 'No previous report' in nightly
   assert 'junit-nightly.previous.xml' in nightly
+
+
+def test_docs_from_imports_prebuilt_docs(tmp_path: Path) -> None:
+  root = _fixture_root(tmp_path)
+  (tmp_path / 'docs-src').mkdir()
+  (tmp_path / 'docs-src' / 'index.html').write_text('<p>release docs</p>', encoding='utf-8')
+  build('9.9.9', root=root, out=tmp_path / 'gh-pages', docs_from=tmp_path / 'docs-src')
+  docs = (tmp_path / 'gh-pages' / 'docs' / 'index.html').read_text(encoding='utf-8')
+  assert 'release docs' in docs
+  index = (tmp_path / 'gh-pages' / 'index.html').read_text(encoding='utf-8')
+  assert 'API documentation' in index

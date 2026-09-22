@@ -10,7 +10,7 @@ SCHEMATHESIS_RELEASE_REPORT ?= reports/schemathesis-release-junit.xml
 SCHEMATHESIS_NIGHTLY_REPORT ?= reports/schemathesis-nightly-junit.xml
 SCHEMATHESIS_STATE ?= /tmp/schemathesis-state.json
 
-.PHONY: help clean tidy build-nightly build package test test-fix_spec test-nightly test-release \
+.PHONY: help clean tidy build-nightly build package test test-fix_spec test-offline test-nightly test-release \
 	schemathesis-release schemathesis-nightly sphinx-html gh-pages
 
 help: ## Show this help
@@ -90,6 +90,9 @@ package: build dist/kavita-client-$(KAVITA_VERSION).zip	## Build wheel + sdist +
 
 test-fix_spec:  ## Run the offline unit tests (no docker needed)
 	./pys.sh -m pytest tests/test_fix_spec.py tests/test_fix_spec_cli.py tests/test_fix_spec_regression.py
+
+test-offline:  ## Run all offline tests (no docker needed)
+	./pys.sh -m pytest tests/test_fix_spec.py tests/test_fix_spec_cli.py tests/test_fix_spec_regression.py tests/test_quirks_registry.py tests/test_pages.py tests/test_docker_guard.py
 
 test-nightly:	## Run nightly snapshot tests
 	./pys.sh pip install --force-reinstall --no-deps "./DEV/kavita-client"

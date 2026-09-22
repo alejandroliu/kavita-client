@@ -129,8 +129,10 @@ schema drift is caught. The nightly run surfaced two dev-spec stragglers
 
 Remaining:
 
-1. **CI wiring** — `docs/TODO-ci-plan.md`: Workflow 1 (release) as a
-   report, Workflow 3 (nightly dev line) as the drift signal feeding the
+1. **CI wiring** — `docs/TODO-ci-plan.md`: the release canary is a
+   non-gating report in Workflow 1 (release) and keeps the site's release
+   page fresh in Workflow 2 job A (stable line); the nightly canary is the
+   drift signal in Workflow 2 job B (dev line), feeding the
    tracking-issue flow.
 2. **Value-provider registry (phase 2)** — *delivered 2026-09-22*:
    `schemathesis_stack.py --populate` builds one of each entity kind,
