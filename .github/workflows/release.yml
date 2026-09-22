@@ -69,20 +69,20 @@ jobs:
         continue-on-error: true
         run: make schemathesis-release
 
-      - name: Upload test reports
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: release-reports
-          path: |
-            reports/junit-release.xml
-            reports/schemathesis-release-junit.xml
-          if-no-files-found: ignore
+      #~ - name: Upload test reports
+        #~ if: always()
+        #~ uses: actions/upload-artifact@v4
+        #~ with:
+          #~ name: release-reports
+          #~ path: |
+            #~ reports/junit-release.xml
+            #~ reports/schemathesis-release-junit.xml
+          #~ if-no-files-found: ignore
 
-      - name: Build API docs (docs.zip)
-        run: |
-          make sphinx-html
-          (cd sphinx/_build/html && zip -qr ../../docs.zip .)
+      #~ - name: Build API docs (docs.zip)
+        #~ run: |
+          #~ make sphinx-html
+          #~ (cd sphinx/_build/html && zip -qr ../../docs.zip .)
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -95,8 +95,8 @@ jobs:
           body: |
             Verified against: `${{ steps.image.outputs.digest }}`
 
-      - name: Trigger nightly site refresh
-        if: startsWith(github.ref, 'refs/tags/')
-        run: gh workflow run nightly.yml
-        env:
-          GH_TOKEN: ${{ github.token }}
+      #~ - name: Trigger nightly site refresh
+        #~ if: startsWith(github.ref, 'refs/tags/')
+        #~ run: gh workflow run nightly.yml
+        #~ env:
+          #~ GH_TOKEN: ${{ github.token }}
