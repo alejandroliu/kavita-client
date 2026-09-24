@@ -79,10 +79,14 @@ jobs:
             #~ reports/schemathesis-release-junit.xml
           #~ if-no-files-found: ignore
 
-      #~ - name: Build API docs (docs.zip)
-        #~ run: |
-          #~ make sphinx-html
-          #~ (cd sphinx/_build/html && zip -qr ../../docs.zip .)
+      - name: Build API docs (docs.zip)
+        run: |
+          make sphinx-html
+          (cd sphinx/_build/html && zip -qr ../../../dist/docs.zip .)
+
+      - name: artifacts
+        run: |
+          ls -lh dist
 
       - name: Publish GitHub Release
         if: startsWith(github.ref, 'refs/tags/')
@@ -91,9 +95,9 @@ jobs:
           tag_name: ${{ github.ref_name }}
           files: |
             dist/kavita-client-${{ steps.resolve.outputs.version }}.zip
-            dist/kavita-client-${{ steps.resolve.outputs.version }}.tar.gz
-            dist/kavita-client-${{ steps.resolve.outputs.version }}-py3-none-any.whl
-            docs.zip
+            dist/kavita_client-${{ steps.resolve.outputs.version }}.tar.gz
+            dist/kavita_client-${{ steps.resolve.outputs.version }}-py3-none-any.whl
+            dist/docs.zip
           body: |
             Verified against: `${{ steps.image.outputs.digest }}`
 
